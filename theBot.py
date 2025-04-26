@@ -1,19 +1,21 @@
 import word_scraper as word
+import theAI
 
 ### python-telegram-bot==13.15
 from telegram import Bot, Update, ParseMode
 from telegram.ext import Updater, CommandHandler, CallbackContext, JobQueue, MessageHandler, Filters
-from telegram.error import TelegramError, Unauthorized, BadRequest, TimedOut, NetworkError
 from dotenv import load_dotenv
 
 import os
+import re
 import requests
 import logging
 import sqlite3
 import threading
 import urllib3
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time
+import pytz
 
 
 load_dotenv()
@@ -220,7 +222,9 @@ def get_reminder_cycle_of_a_user(chat_id: int) -> tuple[int, int, int, int, int]
             with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute("""SELECT first_reminder, second_reminder, third_reminder, fourth_reminder, fifth_reminder FROM chat_ids WHERE chat_id = ?""", (chat_id,))
-                result = c.fetchone()
+                result = c.fetchall()
+                print(result)
+                result = result[0] if result else None
                 if result:
                     logger.info(f"Retrieved reminder cycle for chat ID {chat_id}.")
                     return result
@@ -283,7 +287,6 @@ def responsible_words(chat_id: int) -> list[str]:
     now = datetime.now(timezone.utc)
     reminders = get_reminder_cycle_of_a_user(chat_id)
     if reminders is None:
-        logger.warning(f"No reminder cycle found for chat ID {chat_id}.")
         return
     time_params = [(now - timedelta(days=reminder)).date() for reminder in reminders]
     placeholders = ', '.join(['?'] * len(time_params))
@@ -318,9 +321,14 @@ def responsible_words(chat_id: int) -> list[str]:
 
 
 # --- Command Handlers ---
-def escape_md(text):
+def escape_md(text: str) -> str:
     escape_chars = r"\_*[]()~`>#+-=|{}.!"
     return ''.join(f"\\{c}" if c in escape_chars else c for c in text)
+def escape_md_v2(text: str) -> str:
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    text = text.replace('\\', '\\\\')
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+
 
 def handle_message(update: Update, context: CallbackContext): # TODO: Check whether the user exist or not!!!!
     # FIXME: for poet: ERROR - Error in handle_message: Can't parse entities: character '.' is reserved and must be escaped with the preceding '\'
@@ -540,14 +548,48 @@ def help_command(update: Update, context: CallbackContext):
         "/set_reminders - Change your reminder cycle\n"
         "\n- Kömen")
 
+
+
+def send_daily_essays(context: CallbackContext) -> None:
+    chat_ids = get_chat_ids_and_reminder_cycles()
+    if chat_ids.empty:
+        logger.info("No chat IDs found in the database.")
+        return
+
+    for _, row in chat_ids.iterrows():
+        chat_id = int(row['chat_id'])
+        words = responsible_words(chat_id)
+        if not words:
+            continue
+
+        essay = theAI.generate_an_essay_with_words(words)
+        parts = essay.split('**')
+        for i in range(1, len(parts), 2):
+            parts[i] = f'<b>{parts[i]}</b>'
+        essay = ''.join(parts)
+        if not essay:
+            logger.warning(f"Failed to generate essay for chat ID {chat_id}.")
+            continue
+    
+        essays = []
+        if len(essay) > 1000:
+            essays = [essay[i:i+1000] for i in range(0, len(essay), 1000)]
+        else:
+            essays = [essay]
+        for chunk in essays:
+            context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
+            # FIXME: Sometimes it gives an error: Can't parse entities: character '.' is reserved and must be escaped with the preceding '\'
+            
+
+        logger.info(f"Sent daily essay to chat ID {chat_id}.")
+
+
+
+
+
 def test(update: Update, context: CallbackContext): # TODO: remove this function
-    chat_id = update.effective_chat.id
-    user_name = update.effective_user.first_name
-    logger.info(f"/test command received from {user_name} ({chat_id})")
-    update.message.reply_text(responsible_words(chat_id))
-
-
-
+    send_daily_essays(context)
+    update.message.reply_text("Test function executed.")
 
 # --- Main Function ---
 def main() -> None:
@@ -579,6 +621,12 @@ def main() -> None:
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))    
     logger.info("Command handlers registered.")
 
+    job_queue.run_daily(
+        send_daily_essays,
+        time=time(hour=20, minute=0, second=0, tzinfo=pytz.utc),
+        name="send_daily_essays"
+    )
+    logger.info("Scheduled daily essay job at 12:00 UTC.")
 
     logger.info("Starting bot polling...")
     updater.start_polling()
