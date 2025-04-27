@@ -10,7 +10,7 @@ client = OpenAI(
     api_key=open_router_api_key
 )
 
-def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="story"):
+def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="story", level="B2"):
     words_str = ", ".join(vocab_words)
     
     word_count = 1000 if length == "very-long" else 750 if length == "long" else 500 if length == "medium" else 300 if length == "short" else 150 if length == "very-short" else None
@@ -36,11 +36,13 @@ def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="stor
     Avoid using the words in a list format or as a list of definitions.
     Give me just the {typ} without any additional commentary or explanation.
     """
-    system_instruction = """
+    system_instruction = f"""
     You are a master storyteller and educator whose primary mission is to teach vocabulary through emotionally engaging, context-rich essays. 
     Every essay must integrate a provided list of vocabulary words seamlessly into the narrative.
     You must NOT define the words directly. Instead, you must demonstrate their meaning naturally through how they are used in the story or essay.
     Your writing should be suitable for markdown.
+    Consider that the reader's english level is {level}. So use a language that is appropriate for that level.
+    Your writing should be suitable for a {level} level reader.
     """
     try:
         completion = client.chat.completions.create(

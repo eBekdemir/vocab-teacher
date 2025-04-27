@@ -98,7 +98,8 @@ def init_db():
     logger.info("Database initialized.")
 
 def add_word_to_db(wrd: str) -> tuple[int, list[str], list[str]]:
-    definitions, examples, turkish = word.scrape_the_word(wrd), word.scrape_tureng_turkish(wrd)
+    definitions, examples = word.scrape_the_word(wrd)
+    turkish = word.scrape_turkish_meaning(wrd)
     if not definitions and not examples:
         logger.warning(f"No definitions or examples found for word: {word}")
         return None
@@ -170,8 +171,8 @@ def save_chat_id(user) -> bool:
             with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute("""
+                    INSERT INTO chat_ids (chat_id, first_name, last_name, username)
                     VALUES (?, ?, ?, ?)
-                    INSERT OR REPLACE INTO chat_ids (chat_id, first_name, last_name, username)
                     """, (
                     user.id,
                     user.first_name,
@@ -324,6 +325,47 @@ def responsible_words(chat_id: int) -> list[str]:
             logger.error(f"Error while getting responsible words ({chat_id}): {e}")
             return []
 
+def specific_time_word(chat_id: int, date: list[int] = 'today') -> list[str]:
+    now = datetime.now(timezone.utc)
+    if date == 'today':
+        if now.hour < 12:
+            start_of_day = now - timedelta(hours=18)
+        else:
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        time_condition = "AND uw.created_at >= ?"
+        time_params = [start_of_day]
+    elif date == 'this_week':
+        start_time = now - timedelta(days=7)
+        time_condition = "AND uw.created_at >= ?"
+        time_params = [start_time]
+    else:
+        time_params = [(now - timedelta(days=dt)).date() for dt in date] # date day ago
+    placeholders = ', '.join(['?'] * len(time_params))
+    time_condition = f"AND DATE(uw.created_at) IN ({placeholders})"
+
+    with db_lock:
+        try:
+            with sqlite3.connect(db_path) as conn:
+                c = conn.cursor()
+                c.execute(f"""
+                    SELECT w.word FROM words w
+                    JOIN user_words uw ON w.id = uw.word_id
+                    WHERE uw.chat_id = ? {time_condition}
+                """, (chat_id, *time_params))
+                result = c.fetchall()
+                if result:
+                    words = [row[0] for row in result]
+                    logger.info(f"Retrieved specific_time_word words for chat ID {chat_id}.")
+                    return words
+                else:
+                    logger.warning(f"No specific_time_word words found for chat ID {chat_id}.")
+                    return []
+        except sqlite3.Error as e:
+            logger.error(f"Database error getting specific_time_word words ({chat_id}): {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Error while getting specific_time_word words ({chat_id}): {e}")
+            return []
 
 
 
@@ -337,9 +379,9 @@ def escape_md_v2(text: str) -> str:
     text = text.replace('\\', '\\\\')
     return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
-
 def handle_message(update: Update, context: CallbackContext): # TODO: Check whether the user exist or not!!!!
     # FIXME: for poet: ERROR - Error in handle_message: Can't parse entities: character '.' is reserved and must be escaped with the preceding '\'
+    # i guess the problem is that the word has no examples or definitions, so it returns None. When i try second time, it works.
     chat_id = update.effective_chat.id
     message_text = update.message.text
 
@@ -362,20 +404,88 @@ def handle_message(update: Update, context: CallbackContext): # TODO: Check whet
             match_user_with_word(chat_id=chat_id, word_id=word_id)
         
         defs = "\n".join(f"{i+1} {escape_md(defn)}" for i, defn in enumerate(definitions[:3]))
-        exps = "\n".join(f"{i+1} {escape_md(ex)}" for i, ex in enumerate(examples[:3]))
-
-        reply_text = (
-            f"*Definitions of {escape_md(message_text)}:*\n"
-            f"{defs}\n\n"
-            f"*Examples:*\n{exps if examples else 'No examples available.'}"
-        )
-
+        if len(examples) != 0 and examples[0] != '':
+            exps = "\n".join(f"{i+1} {escape_md(ex)}" for i, ex in enumerate(examples[:3]))
+            reply_text = (
+                f"*Definitions of {escape_md(wrd)}:*\n"
+                f"{defs}\n\n"
+                f"*Examples:*\n{exps}"
+            )
+        else:
+            reply_text = (
+                f"*Definitions of {escape_md(wrd)}:*\n"
+                f"{defs}"
+                "\n\nThere are no examples available on Cambridge Dictionary for this word\."
+            )
         update.message.reply_text(reply_text, parse_mode=ParseMode.MARKDOWN_V2)
 
 
     except Exception as e:
         logger.error(f"Error in handle_message: {e}")
         update.message.reply_text("Something went wrong while processing your request.")
+
+
+def define_command(update: Update, context: CallbackContext):
+    if len(context.args) == 0:
+        update.message.reply_text("Please provide a word to define. (e.g. /define word)")
+        return
+
+    chat_id = update.effective_chat.id
+    
+    for theWord in context.args:
+        try:
+            wrd = theWord.lower().strip()
+            check_db = get_word_from_db(wrd)
+            if check_db == 'NOT IN DATABASE':
+                the_id = add_word_to_db(wrd)
+                if not the_id: 
+                    update.message.reply_text("I don't understand what you say!")
+                    return
+                word_id, definitions, examples = the_id
+            else:
+                word_id, definitions, examples = check_db
+            
+            defs = "\n".join(f"{i+1} {escape_md(defn)}" for i, defn in enumerate(definitions[:3]))
+            if len(examples) != 0 and examples[0] != '':
+                exps = "\n".join(f"{i+1} {escape_md(ex)}" for i, ex in enumerate(examples[:3]))
+                reply_text = (
+                    f"*Definitions of {escape_md(wrd)}:*\n"
+                    f"{defs}\n\n"
+                    f"*Examples:*\n{exps if examples else 'No examples available.'}"
+                )
+            else:
+                reply_text = (
+                    f"*Definitions of {escape_md(wrd)}:*\n"
+                    f"{defs}"
+                    "\n\nThere are no examples available on Cambridge Dictionary for this word\."
+                )
+
+            text = []
+            char_limit = 4000
+            if len(reply_text) > char_limit:
+                cb = 0
+                ca = 0
+                for i in range(0, len(reply_text), char_limit):
+                    if i+cb+char_limit > len(reply_text):
+                        text.append(reply_text[i+cb:])
+                        break
+                    while reply_text[i+ca+char_limit] != ' ':
+                        ca += 1
+                    text.append(reply_text[i+cb:i+ca+char_limit])
+                    cb = ca
+                    ca = 0
+            else:
+                text = [reply_text]
+
+            for rply in text:
+                update.message.reply_text(rply, parse_mode=ParseMode.MARKDOWN_V2)
+
+
+        except Exception as e:
+            logger.error(f"Error in handle_message: {e}")
+            update.message.reply_text(f"Something went wrong while processing your request. ({theWord})")
+
+
 
 
 def get_words_command(update: Update, context: CallbackContext) -> list[str]:
@@ -538,6 +648,102 @@ def stop(update: Update, context: CallbackContext):
     else:
         update.message.reply_text("You are not in our database. Please contact with the admin:\n\n- Kömen | 42enesbekdemir@gmail.com")
 
+def stats_command(update: Update, context: CallbackContext):
+    chat_id = update.effective_chat.id
+    user_name = update.effective_user.first_name
+    logger.info(f"/stats command received from {user_name} ({chat_id})")
+    try:
+        with db_lock:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute('''SELECT created_at FROM user_words WHERE chat_id = ?''', (chat_id,))
+            all_words = cursor.fetchall()
+            conn.close()
+
+        all_dates = [datetime.strptime(t[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc) for t in all_words]
+        responsibility_sum = len(responsible_words(chat_id))
+        now = datetime.now(timezone.utc)
+        if now.hour < 12:
+            start_of_day = now - timedelta(hours=18)
+        else:
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        start_week = now - timedelta(days=7)
+        
+        today_sum = 0
+        this_week_sum = 0
+        for date in all_dates:
+            if date >= start_of_day:
+                today_sum += 1
+            if date >= start_week:
+                this_week_sum += 1
+
+        all_days = [date.date() for date in all_dates]
+        streak = 0
+        while streak < len(all_dates) and (now.date() - timedelta(days=streak)) in all_days:
+            streak += 1
+
+        text = (
+            f"Hello {user_name}! 👋\n"
+            f"Here are your stats:\n\n"
+            f"You have added a total of <b>{len(all_dates)}</b>{'❤️‍🔥' if len(all_dates) >= 5 else ''} words to your vocabulary.\n"
+            f"{today_sum if today_sum < len(all_dates) else 'All'} of them are added today. /today\n"
+            f"{this_week_sum if this_week_sum < len(all_dates) else 'All'} of them are added this week. /this_week\n"
+            f"{responsibility_sum if responsibility_sum < len(all_dates) else 'All'} of them are your responsibility for today. /responsibility"
+            f"\n\nYour current streak is <b>{streak}</b>{'💀' if streak >= 10 else '🔥' if streak >=5 else '😎' if streak >= 3 else ''} day{'s' if streak >= 2 else ''}.\n"
+            f"\n\nYou can view your words with /words command.\n")            
+
+        update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        logger.info(f"Stats command executed for chat ID {chat_id}.")
+    except sqlite3.Error as e:
+        logger.error(f"SQLite error: {e}")
+        update.message.reply_text("An error occurred while retrieving stats.")
+    except Exception as e:
+        logger.error(f"Error in stats command ({chat_id}): {e}")
+        update.message.reply_text("An error occurred while retrieving stats.")
+
+def delete_word(update: Update, context: CallbackContext):
+    chat_id = update.effective_chat.id
+    if len(context.args) == 0:
+        update.message.reply_text("Please provide a word to delete. (e.g. /delete word)")
+        return
+
+    word_to_delete = context.args[0].lower()
+    with db_lock:
+        try:
+            with sqlite3.connect(db_path) as conn:
+                c = conn.cursor()
+                c.execute('''DELETE FROM user_words WHERE chat_id = ? AND word_id IN (SELECT id FROM words WHERE word = ?)''', (chat_id, word_to_delete))
+                conn.commit()
+                if conn.total_changes > 0:
+                    update.message.reply_text(f"The word '{word_to_delete}' has been deleted from your vocabulary.")
+                    logger.info(f"Deleted word '{word_to_delete}' for chat ID {chat_id}.")
+                else:
+                    update.message.reply_text(f"The word '{word_to_delete}' was not found in your vocabulary.")
+                    logger.warning(f"Word '{word_to_delete}' not found for chat ID {chat_id}.")
+        except sqlite3.Error as e:
+            logger.error(f"SQLite error: {e}")
+            update.message.reply_text("An error occurred while deleting the word.")
+        except Exception as e:
+            logger.error(f"Error deleting word ({chat_id}, {word_to_delete}): {e}")
+            update.message.reply_text("An error occurred while deleting the word.")
+
+
+def turkish_meaning_command(update: Update, context: CallbackContext):
+    if len(context.args) == 0:
+        update.message.reply_text("Please provide a word to translate. (e.g. /tr word)")
+        return
+
+    word_to_translate = context.args[0].lower()
+    
+    # TODO: Check if the word is already in the database
+        
+    turkish_meaning = word.scrape_turkish_meaning(word_to_translate) 
+    if turkish_meaning:
+        turkish_meaning_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(turkish_meaning[:3]))
+        update.message.reply_text(f"*Turkish meaning of {word_to_translate}:*\n{turkish_meaning_text}", parse_mode=ParseMode.MARKDOWN)
+    else:
+        update.message.reply_text(f"No Turkish meaning found for '{word_to_translate}'.")
 
 def help_command(update: Update, context: CallbackContext):
     text = (
@@ -547,8 +753,11 @@ def help_command(update: Update, context: CallbackContext):
         "🛠 *Commands you can use:*\n"
         "/start - Start the bot\n"
         "/stop - Stop the bot\n"
+        "/stats - View your vocabulary stats\n"
         "/help - Show this help message\n"
         "`/any_command -help` - Show help for any command\n"
+        "/define `[word]` - Get all definitions of a word\n"
+        "/tr `[word]` - Get the Turkish meaning of a word\n"
         "/delete `[word]` - Delete a word from your vocabulary\n"
         "/words - View all your words\n"
         "/today - View words added today\n"
@@ -559,7 +768,6 @@ def help_command(update: Update, context: CallbackContext):
         "/set\_reminders - Update your reminder cycle\n\n"
         "💡 *Quick Tip:*\n"
         "You can also send me a word directly to get its definitions and examples.\n"
-        "Or use /tr `[word]` to get the Turkish meaning of a word.\n"
         "Happy learning! 🎉📚\n"
         "\n- *Kömen*✨"
     )
@@ -587,38 +795,69 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
             theme = ''
             length = ''
             typ = ''
+            level = 'B2'
             for arg in context.args:
                 if arg.startswith('-'):
                     if arg == '-help':
-                        update.message.reply_text("Usage: /essay [-story | -essay | -paragraph] [-very-short | -short | -medium | -long | -very-long] [theme] \n\nFor example: /essay -story -short a day in the life of a student")
+                        update.message.reply_text("Usage: /essay [-story | -essay | -paragraph] [-very-short | -short | -medium | -long | -very-long] [-A1 | -A2 | -B1 | -B2 | -C1 | -C2] [-today | -this-week | -all | -responsibility] [theme] \n\nFor example: /essay -story -short a day in the life of a student")
                         return
                     elif arg.startswith('-') and arg in ['-story', '-essay', '-paragraph']:
-                        typ = arg[2:]
+                        typ = arg[1:]
                     elif arg.startswith('-') and arg in ['-very-short', '-short', '-medium', '-long', '-very-long']:
-                        length = arg[2:]
+                        length = arg[1:]
+                    elif arg.startswith('-') and arg.upper() in ['-A1', '-A2', '-B1', '-B2', '-C1', '-C2']:
+                        level = arg[1:].upper()
+                    elif arg.startswith('-') and arg in ['-today', '-this-week', '-all', '-responsibility']:
+                        words_range = arg[1:]
+                        if words_range == 'today':
+                            words = specific_time_word(chat_id, date='today')
+                        elif words_range == 'this_week':
+                            words = specific_time_word(chat_id, date='this_week')
+                        elif words_range == 'all':
+                            with db_lock:
+                                conn = sqlite3.connect(db_path)
+                                cursor = conn.cursor()
+                                query = f'''
+                                    SELECT w.word FROM words w
+                                    JOIN user_words uw ON w.id = uw.word_id
+                                    WHERE uw.chat_id = ?
+                                '''
+                                cursor.execute(query, [chat_id])
+                                result = cursor.fetchall()
+                                conn.close()
+                                if result:
+                                    words = [row[0] for row in result]
+                                else:
+                                    update.message.reply_text("No words found in your vocabulary.")
+                                    return
                     else:
                         update.message.reply_text(f"Unknown argument: {arg}. Use /essay -help for usage.")
                         return
                 else:
                     theme += arg + ' '
             placeholder_message = update.message.reply_text("Generating essay...")
-            essay = theAI.generate_an_essay_with_words(words, theme=theme.strip(), length=length, typ=typ)
+            essay = theAI.generate_an_essay_with_words(words, theme=theme.strip(), length=length, typ=typ, level=level)
 
         if not essay:
-            update.message.reply_text("Failed to generate an essay.")
+            context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=placeholder_message.message_id,
+                text="Failed to generate an essay. Please try again later.",
+            )
             return
 
         essays = []
-        if len(essay) > 1000:
+        char_limit = 4000
+        if len(essay) > char_limit:
             cb = 0
             ca = 0
-            for i in range(0, len(essay), 1000):
-                if i+cb+1000 > len(essay):
+            for i in range(0, len(essay), char_limit):
+                if i+cb+char_limit > len(essay):
                     essays.append(essay[i+cb:])
                     break
-                while essay[i+ca+1000] != ' ':
+                while essay[i+ca+char_limit] != ' ':
                     ca += 1
-                essays.append(essay[i+cb:i+ca+1000])
+                essays.append(essay[i+cb:i+ca+char_limit])
                 cb = ca
                 ca = 0
 
@@ -665,13 +904,24 @@ def send_daily_essays(context: CallbackContext) -> None:
                 continue
         
             essays = []
-            if len(essay) > 1000:
-                essays = [essay[i:i+1000] for i in range(0, len(essay), 1000)]
+            char_limit = 4000
+            if len(essay) > char_limit:
+                cb = 0
+                ca = 0
+                for i in range(0, len(essay), char_limit):
+                    if i+cb+char_limit > len(essay):
+                        essays.append(essay[i+cb:])
+                        break
+                    while essay[i+ca+char_limit] != ' ':
+                        ca += 1
+                    essays.append(essay[i+cb:i+ca+char_limit])
+                    cb = ca
+                    ca = 0
             else:
                 essays = [essay]
+
             for chunk in essays:
                 context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
-                # FIXME: Sometimes it gives an error: Can't parse entities: character '.' is reserved and must be escaped with the preceding '\'
         except Exception as e:
             logger.error(f"Error sending daily essay to chat ID {chat_id}: {e}")
             continue
@@ -705,17 +955,22 @@ def main() -> None:
 
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("stop", stop))
+    dispatcher.add_handler(CommandHandler("delete", delete_word))
     dispatcher.add_handler(CommandHandler("help", help_command))
     
     dispatcher.add_handler(CommandHandler("words", get_words_command))
     dispatcher.add_handler(CommandHandler("today", get_words_command))
     dispatcher.add_handler(CommandHandler("this_week", get_words_command))
     dispatcher.add_handler(CommandHandler("responsibility", get_words_command))
+    dispatcher.add_handler(CommandHandler("stats", stats_command))
     
     dispatcher.add_handler(CommandHandler("reminder", get_reminder_command))
     dispatcher.add_handler(CommandHandler("set_reminders", set_reminder_command))
 
     dispatcher.add_handler(CommandHandler("essay", send_essay_to_user))
+    
+    dispatcher.add_handler(CommandHandler("tr", turkish_meaning_command))
+    dispatcher.add_handler(CommandHandler("define", define_command))
     
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))    
     logger.info("Command handlers registered.")
@@ -738,12 +993,10 @@ if __name__ == '__main__':
 
     # TODO: Add a command to pronounce a word (from gtts import gTTS, from io import BytesIO)
     # TODO: Add a function to pronounce an essay
-    # TODO: Add a command to delete a word from user vocabulary
-    # TODO: Add a command to get the Turkish meaning of a word
     # TODO: Add exam functionality (multiple choice, fill in the blanks, etc.)
-    # TODO: Add email functionality (send daily essays to email) and email subscription
+    # TODO: Add email functionality (send daily essays to email) and email subscription (/subscribe_email [email])
+    
     # TODO: Research what is inline mode and how to use it
-    # TODO: /stats command to show total words, words added this week/month, review streak, etc.
     
     # TODO: Asnc functions for scraping and ai operations
     
@@ -756,4 +1009,6 @@ if __name__ == '__main__':
     
     # TODO: Offer pre-defined lists of words users can add (e.g., "Business English", "Academic Vocabulary", "Common Phrasal Verbs")
     
+    # TODO: /define [word] to get all definitions of the word 
     
+    # TODO: /essay -today (-this_week) to generate an essay using the words added today 
