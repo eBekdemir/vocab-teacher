@@ -60,19 +60,24 @@ def init_db():
                         first_name TEXT,
                         last_name TEXT,
                         username TEXT,
+                        email TEXT DEFAULT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         first_reminder INTEGER DEFAULT 0,
                         second_reminder INTEGER DEFAULT 1,
                         third_reminder INTEGER DEFAULT 3,
                         fourth_reminder INTEGER DEFAULT 6,
-                        fifth_reminder INTEGER DEFAULT 14
+                        fifth_reminder INTEGER DEFAULT 14,
+                        UNIQUE (chat_id) ON CONFLICT REPLACE
                         )''')
         c.execute('''CREATE TABLE IF NOT EXISTS words (
                         id INTEGER PRIMARY KEY,
                         word TEXT,
                         definitions TEXT,
                         examples TEXT,
-                        turkish_meaning TEXT DEFAULT NULL
-                        )''') ### TODO: add turkish meaning
+                        turkish_meaning TEXT DEFAULT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE (word) ON CONFLICT REPLACE
+                        )''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_words (
                         id INTEGER PRIMARY KEY,
                         chat_id INTEGER,
@@ -92,16 +97,20 @@ def init_db():
         conn.close()
     logger.info("Database initialized.")
 
-def add_word_to_db(wrd: str) -> tuple[int, list[str], list[str]]: # returns word_id
-    definitions, examples = word.scrape_the_word(wrd)
+def add_word_to_db(wrd: str) -> tuple[int, list[str], list[str]]:
+    definitions, examples, turkish = word.scrape_the_word(wrd), word.scrape_tureng_turkish(wrd)
     if not definitions and not examples:
         logger.warning(f"No definitions or examples found for word: {word}")
         return None
+    if not turkish:
+        logger.warning(f"No turkish meaning found for word: {word}")
+        turkish = None
+    
     with db_lock:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute('''INSERT INTO words (word, definitions, examples) VALUES (?, ?, ?)''',
-                    (wrd, ';;;'.join(definitions), ';;;'.join(examples)))
+        cursor.execute('''INSERT INTO words (word, definitions, examples, turkish_meaning) VALUES (?, ?, ?, ?)''',
+                    (wrd, ';;;'.join(definitions), ';;;'.join(examples), ';;;'.join(turkish) if turkish else None))
         word_id = cursor.lastrowid
         conn.commit()
         conn.close()
@@ -161,8 +170,8 @@ def save_chat_id(user) -> bool:
             with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute("""
-                    INSERT OR REPLACE INTO chat_ids (chat_id, first_name, last_name, username)
                     VALUES (?, ?, ?, ?)
+                    INSERT OR REPLACE INTO chat_ids (chat_id, first_name, last_name, username)
                     """, (
                     user.id,
                     user.first_name,
@@ -223,7 +232,6 @@ def get_reminder_cycle_of_a_user(chat_id: int) -> tuple[int, int, int, int, int]
                 c = conn.cursor()
                 c.execute("""SELECT first_reminder, second_reminder, third_reminder, fourth_reminder, fifth_reminder FROM chat_ids WHERE chat_id = ?""", (chat_id,))
                 result = c.fetchall()
-                print(result)
                 result = result[0] if result else None
                 if result:
                     logger.info(f"Retrieved reminder cycle for chat ID {chat_id}.")
@@ -373,14 +381,14 @@ def handle_message(update: Update, context: CallbackContext): # TODO: Check whet
 def get_words_command(update: Update, context: CallbackContext) -> list[str]:
     command = update.message.text.split()[0][1:] 
     
-    if command == "words":
-        period = "all"
-    elif command == "today":
-        period = "today"
-    elif command == "this_week":
-        period = "this_week"
-    elif command == "responsibility":
-        period = "responsibility"
+    periods = {
+        "words": "all",
+        "today": "today",
+        "this_week": "this_week",
+        "responsibility": "responsibility"
+    }
+    if command in periods:
+        period = periods.get(command)
     else:
         update.message.reply_text("Invalid command. Please use /words, /today, or /this_week.")
         return
@@ -532,56 +540,142 @@ def stop(update: Update, context: CallbackContext):
 
 
 def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "I am here to support your vocabulary level!\n"
-        "When you don't know a word, then just pass me the word!\n"
-        "I will give you the definitions and examples of the word.\n\n"
-        "You can also use the following commands:\n"
+    text = (
+        "🌟 *Welcome to Vocabulary Bot!* 🌟\n\n"
+        "*How I can help you:*\n"
+        "When you encounter a word you don't know, just send it to me! I'll provide you with its definitions and examples.\n\n"
+        "🛠 *Commands you can use:*\n"
         "/start - Start the bot\n"
         "/stop - Stop the bot\n"
         "/help - Show this help message\n"
-        "/words - Show your words\n"
-        "/today - Show today's added words\n"
-        "/this_week - Show this week's added words\n"
-        "/responsibility - Show the words that you are responsible today\n"
-        "/reminder - Show your reminder cycle\n"
-        "/set_reminders - Change your reminder cycle\n"
-        "\n- Kömen")
+        "`/any_command -help` - Show help for any command\n"
+        "/delete `[word]` - Delete a word from your vocabulary\n"
+        "/words - View all your words\n"
+        "/today - View words added today\n"
+        "/this\_week - View words added this week\n"
+        "/responsibility - View words you're responsible for today\n"
+        "/essay - Generate an essay using your responsible words\n"
+        "/reminder - View your reminder cycle\n"
+        "/set\_reminders - Update your reminder cycle\n\n"
+        "💡 *Quick Tip:*\n"
+        "You can also send me a word directly to get its definitions and examples.\n"
+        "Or use /tr `[word]` to get the Turkish meaning of a word.\n"
+        "Happy learning! 🎉📚\n"
+        "\n- *Kömen*✨"
+    )
+    # escaped_text = escape_md(text)
+    update.message.reply_text(
+        text,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+def send_essay_to_user(update: Update, context: CallbackContext) -> None:
+    try:
+        now = datetime.now(timezone.utc)
+        chat_id = update.effective_chat.id
+        words = responsible_words(chat_id)
+        if not words:
+            update.message.reply_text("You don't have any words to generate an essay.")
+            return
+
+
+        if len(context.args) == 0:
+            placeholder_message = update.message.reply_text("Generating essay...")
+            essay = theAI.generate_an_essay_with_words(words)
+        else:
+            theme = ''
+            length = ''
+            typ = ''
+            for arg in context.args:
+                if arg.startswith('-'):
+                    if arg == '-help':
+                        update.message.reply_text("Usage: /essay [-story | -essay | -paragraph] [-very-short | -short | -medium | -long | -very-long] [theme] \n\nFor example: /essay -story -short a day in the life of a student")
+                        return
+                    elif arg.startswith('-') and arg in ['-story', '-essay', '-paragraph']:
+                        typ = arg[2:]
+                    elif arg.startswith('-') and arg in ['-very-short', '-short', '-medium', '-long', '-very-long']:
+                        length = arg[2:]
+                    else:
+                        update.message.reply_text(f"Unknown argument: {arg}. Use /essay -help for usage.")
+                        return
+                else:
+                    theme += arg + ' '
+            placeholder_message = update.message.reply_text("Generating essay...")
+            essay = theAI.generate_an_essay_with_words(words, theme=theme.strip(), length=length, typ=typ)
+
+        if not essay:
+            update.message.reply_text("Failed to generate an essay.")
+            return
+
+        essays = []
+        if len(essay) > 1000:
+            cb = 0
+            ca = 0
+            for i in range(0, len(essay), 1000):
+                if i+cb+1000 > len(essay):
+                    essays.append(essay[i+cb:])
+                    break
+                while essay[i+ca+1000] != ' ':
+                    ca += 1
+                essays.append(essay[i+cb:i+ca+1000])
+                cb = ca
+                ca = 0
+
+        else:
+            essays = [essay]
+        context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=placeholder_message.message_id,
+            text=essays[0],
+            parse_mode=ParseMode.MARKDOWN 
+        )
+        for chunk in essays[1:]:
+            update.message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN)
+        
+        logger.info(f"Sent essay to chat ID {chat_id}. It took {datetime.now(timezone.utc) - now} seconds.")
+    except Exception as e:
+        logger.error(f"Error in send_essay_to_user: {e}")
+        update.message.reply_text("An error occurred while generating the essay.")
+        
 
 
 
 def send_daily_essays(context: CallbackContext) -> None:
+    logging.info("Sending daily essays...")
     chat_ids = get_chat_ids_and_reminder_cycles()
     if chat_ids.empty:
         logger.info("No chat IDs found in the database.")
         return
 
     for _, row in chat_ids.iterrows():
-        chat_id = int(row['chat_id'])
-        words = responsible_words(chat_id)
-        if not words:
-            continue
+        try:
+            chat_id = int(row['chat_id'])
+            words = responsible_words(chat_id)
+            if not words:
+                continue
 
-        essay = theAI.generate_an_essay_with_words(words)
-        parts = essay.split('**')
-        for i in range(1, len(parts), 2):
-            parts[i] = f'<b>{parts[i]}</b>'
-        essay = ''.join(parts)
-        if not essay:
-            logger.warning(f"Failed to generate essay for chat ID {chat_id}.")
+            essay = theAI.generate_an_essay_with_words(words) # TODO: make it async
+            parts = essay.split('**')
+            for i in range(1, len(parts), 2):
+                parts[i] = f'<b>{parts[i]}</b>'
+            essay = ''.join(parts)
+            if not essay:
+                logger.warning(f"Failed to generate essay for chat ID {chat_id}.")
+                continue
+        
+            essays = []
+            if len(essay) > 1000:
+                essays = [essay[i:i+1000] for i in range(0, len(essay), 1000)]
+            else:
+                essays = [essay]
+            for chunk in essays:
+                context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
+                # FIXME: Sometimes it gives an error: Can't parse entities: character '.' is reserved and must be escaped with the preceding '\'
+        except Exception as e:
+            logger.error(f"Error sending daily essay to chat ID {chat_id}: {e}")
             continue
-    
-        essays = []
-        if len(essay) > 1000:
-            essays = [essay[i:i+1000] for i in range(0, len(essay), 1000)]
-        else:
-            essays = [essay]
-        for chunk in essays:
-            context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
-            # FIXME: Sometimes it gives an error: Can't parse entities: character '.' is reserved and must be escaped with the preceding '\'
-            
-
-        logger.info(f"Sent daily essay to chat ID {chat_id}.")
+        logger.info(f"Daily essay sent to chat ID {chat_id}.")
 
 
 
@@ -593,6 +687,9 @@ def test(update: Update, context: CallbackContext): # TODO: remove this function
 
 # --- Main Function ---
 def main() -> None:
+    
+
+
     init_db()
 
     token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -618,6 +715,8 @@ def main() -> None:
     dispatcher.add_handler(CommandHandler("reminder", get_reminder_command))
     dispatcher.add_handler(CommandHandler("set_reminders", set_reminder_command))
 
+    dispatcher.add_handler(CommandHandler("essay", send_essay_to_user))
+    
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))    
     logger.info("Command handlers registered.")
 
@@ -636,3 +735,25 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+    # TODO: Add a command to pronounce a word (from gtts import gTTS, from io import BytesIO)
+    # TODO: Add a function to pronounce an essay
+    # TODO: Add a command to delete a word from user vocabulary
+    # TODO: Add a command to get the Turkish meaning of a word
+    # TODO: Add exam functionality (multiple choice, fill in the blanks, etc.)
+    # TODO: Add email functionality (send daily essays to email) and email subscription
+    # TODO: Research what is inline mode and how to use it
+    # TODO: /stats command to show total words, words added this week/month, review streak, etc.
+    
+    # TODO: Asnc functions for scraping and ai operations
+    
+    # TODO: SM-2 (super memory algorithm) ?
+    
+    # TODO: /generate_example command to generate an example sentence using a word
+    # TODO: Add commands /synonyms [word] and /antonyms [word] (we can do it with theAI)
+    
+    # TODO: /simplify [word] to ask theAI to explain the definition in simpler terms
+    
+    # TODO: Offer pre-defined lists of words users can add (e.g., "Business English", "Academic Vocabulary", "Common Phrasal Verbs")
+    
+    

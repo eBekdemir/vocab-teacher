@@ -18,23 +18,23 @@ def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="stor
     if word_count is None:
         word_count = 75 if len(vocab_words) < 5 else len(vocab_words) * 15 if len(vocab_words) < 10 else len(vocab_words) * 12 if len(vocab_words) < 20 else len(vocab_words) * 10 if len(vocab_words) < 30 else len(vocab_words) * 8
     
-    theme_instruction = f" about {theme}" if theme else ""
+    theme_instruction = f" about {theme}" if theme != '' and theme != None else ""
     
     prompt = f"""
-    Write a {word_count}-word {'story' if typ == 'story' else 'essay' if typ == 'essay' else 'paragraph'}{theme_instruction} that naturally incorporates the following vocabulary words: 
+    Write a {word_count}-word {typ}{theme_instruction} that naturally incorporates the following vocabulary words: 
     {words_str}.
 
-    The story should be engaging and imaginative, with a clear beginning, middle, and end. 
+    The {typ} should be engaging and imaginative, with a clear beginning, middle, and end. 
     Use descriptive language to create vivid imagery and evoke emotions in the reader. 
-    The vocabulary words should be used in a way that enhances the story, rather than feeling forced or out of place. 
-    Aim for a balance between creativity and clarity, ensuring that the story is easy to follow while still being rich in detail. 
+    The vocabulary words should be used in a way that enhances the {typ}, rather than feeling forced or out of place. 
+    Aim for a balance between creativity and clarity, ensuring that the {typ} is easy to follow while still being rich in detail. 
     Avoid using overly complex sentence structures or obscure references that may confuse the reader. Instead, focus on creating a narrative that is both entertaining and thought-provoking. 
     The words should blend seamlessly into the narrative, demonstrating their meanings through context rather than direct definitions.
     Use all the words in their correct context
-    Bold each vocabulary word when it appears in the {'story' if typ == 'story' else 'essay' if typ == 'essay' else 'paragraph'}.
+    Bold each vocabulary word when it appears in the {typ}.
     Use a good english grammar and punctuation.
     Avoid using the words in a list format or as a list of definitions.
-    Give me just the {'story' if typ == 'story' else 'essay' if typ == 'essay' else 'paragraph'} without any additional commentary or explanation.
+    Give me just the {typ} without any additional commentary or explanation.
     """
     system_instruction = """
     You are a master storyteller and educator whose primary mission is to teach vocabulary through emotionally engaging, context-rich essays. 

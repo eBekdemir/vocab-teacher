@@ -24,4 +24,16 @@ def scrape_the_word(wrd:str) -> tuple[list[str], list[str]]:
     
     return definitions, examples
 
-### TODO: Add turkish meaning scraper
+
+def scrape_tureng_turkish(wrd:str) -> list[str]:
+    word = wrd.replace(' ', '-')
+    
+    word = word.strip().lower()
+    
+    url = f"https://tureng.com/tr/turkce-ingilizce/{word}"
+    response = session.get(url, headers=headers, verify=False, timeout=20)
+
+    soup = bs(response.content, 'html.parser')
+
+    turkish_meanings = [item.text.strip() for item in soup.find_all('td', class_='tr ts')]
+    return turkish_meanings[:5]
