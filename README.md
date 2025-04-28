@@ -1,5 +1,5 @@
 # AI Powered Vocabulary Teacher Bot
-[Visit the Vocabulary Teacher Bot on Telegram @TheVocabBot](https://t.me/TheVocabBot)
+<a href="https://t.me/TheVocabBot" target="_blank">Visit the Vocabulary Teacher Bot on Telegram</a>
 
 The Vocabulary Teacher Bot is a Telegram bot designed to help users improve their vocabulary through interactive learning. It provides definitions, examples, pronunciation, and even generates essays using the words you learn with AI. The bot also includes features like reminders, statistics, and customizable learning cycles.
 <br>
