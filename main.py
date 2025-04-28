@@ -74,7 +74,7 @@ def main() -> None:
     toaster.show_toast("The Vocabulary Bot", "The Vocabulary Bot has just started!", duration=5, threaded=True)
 
     updater.idle()
-    logger.info(f"Bot stopped.\n{'='*50}")
+    logger.info(f"Bot stopped.\n{'='*125}")
 
 if __name__ == '__main__':
     main()

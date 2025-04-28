@@ -200,7 +200,6 @@ def get_reminder_cycle_of_a_user(chat_id: int) -> tuple[int, int, int, int, int]
                 result = c.fetchall()
                 result = result[0] if result else None
                 if result:
-                    logger.info(f"Retrieved reminder cycle for chat ID {chat_id}.")
                     return result
                 else:
                     logger.warning(f"No reminder cycle found for chat ID {chat_id}.")
@@ -277,7 +276,6 @@ def responsible_words(chat_id: int) -> list[str]:
                 result = c.fetchall()
                 if result:
                     words = [row[0] for row in result]
-                    logger.info(f"Retrieved responsible words for chat ID {chat_id}.")
                     return words
                 else:
                     logger.warning(f"No responsible words found for chat ID {chat_id}.")

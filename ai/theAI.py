@@ -1,7 +1,7 @@
 from openai import OpenAI
 import logging
 import datetime
-from config.settings import deepseek_r1, LOG_FILE_PATH
+from config.settings import AI_API, LOG_FILE_PATH, AI_MODEL
 
 logging.basicConfig(
     filename=LOG_FILE_PATH,
@@ -13,13 +13,14 @@ ai_logger = logging.getLogger(__name__)
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=deepseek_r1
+    api_key=AI_API
 )
 
 def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="story", level="B2"):
     now = datetime.datetime.now()
     words_str = ", ".join(vocab_words)
-    
+    if typ not in ["story", "essay", "paragraph"]:
+        typ = "story"
     word_count = 1000 if length == "very-long" else 750 if length == "long" else 500 if length == "medium" else 300 if length == "short" else 150 if length == "very-short" else None
     
     if word_count is None:
@@ -56,16 +57,17 @@ def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="stor
     for _ in range(3):
         try:
             completion = client.chat.completions.create(
-                model="deepseek/deepseek-r1:free",
+                model=AI_MODEL,
                 messages=[
                     {"role": "system", "content": system_instruction},
                     {"role": "user", "content": prompt}
                 ]
             )
-            if completion.choices[0].message.content == "":
+            essay = completion.choices[0].message.content
+            if essay == "":
                 raise ValueError("Empty response from AI")
-            ai_logger.info(f"Essay generated in {datetime.datetime.now() - now} seconds")
-            return completion.choices[0].message.content
+            ai_logger.info(f"Essay generated in {datetime.datetime.now() - now} seconds. Essay length: {len(essay.split())} words.")
+            return essay
         except Exception as e:
             if err == 2: 
                 ai_logger.error(f"Essay couldn't generated in {datetime.datetime.now() - now} seconds")

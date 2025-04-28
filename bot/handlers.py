@@ -110,7 +110,7 @@ def pronounce_command(update: Update, context: CallbackContext):
     
     audio_file = pronounce(word_to_pronounce, slow=slow, language='en')
     if audio_file:
-        update.message.reply_voice(voice=audio_file, caption=f"Pronunciation of *{word_to_pronounce}*:", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_audio(voice=audio_file, caption=f"Pronunciation of *{word_to_pronounce}*:", parse_mode=ParseMode.MARKDOWN)
     else:
         update.message.reply_text(f"Could not generate pronunciation for '{word_to_pronounce}'.")
         logger.error(f"Could not generate pronunciation for '{word_to_pronounce}'.")
@@ -342,7 +342,6 @@ def stop(update: Update, context: CallbackContext):
 def stats_command(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     user_name = update.effective_user.first_name
-    logger.info(f"/stats command received from {user_name} ({chat_id})")
     try:
         with db_lock:
             conn = sqlite3.connect(db_path)
@@ -399,42 +398,54 @@ def delete_word(update: Update, context: CallbackContext):
         update.message.reply_text("Please provide a word to delete. (e.g. /delete word)")
         return
 
-    word_to_delete = context.args[0].lower()
+    words_to_delete = [arg.lower() for arg in context.args]
+    words_deleted = []
     with db_lock:
-        try:
-            with sqlite3.connect(db_path) as conn:
-                c = conn.cursor()
-                c.execute('''DELETE FROM user_words WHERE chat_id = ? AND word_id IN (SELECT id FROM words WHERE word = ?)''', (chat_id, word_to_delete))
-                conn.commit()
-                if conn.total_changes > 0:
-                    update.message.reply_text(f"The word '{word_to_delete}' has been deleted from your vocabulary.")
-                    logger.info(f"Deleted word '{word_to_delete}' for chat ID {chat_id}.")
-                else:
-                    update.message.reply_text(f"The word '{word_to_delete}' was not found in your vocabulary.")
-                    logger.warning(f"Word '{word_to_delete}' not found for chat ID {chat_id}.")
-        except sqlite3.Error as e:
-            logger.error(f"SQLite error: {e}")
-            update.message.reply_text("An error occurred while deleting the word.")
-        except Exception as e:
-            logger.error(f"Error deleting word ({chat_id}, {word_to_delete}): {e}")
-            update.message.reply_text("An error occurred while deleting the word.")
+        for word_to_delete in words_to_delete:
+            try:
+                with sqlite3.connect(db_path) as conn:
+                    c = conn.cursor()
+                    c.execute('''DELETE FROM user_words WHERE chat_id = ? AND word_id IN (SELECT id FROM words WHERE word = ?)''', (chat_id, word_to_delete))
+                    conn.commit()
+                    if conn.total_changes > 0: 
+                        words_deleted.append(word_to_delete)
+                    else:
+                        update.message.reply_text(f"The word '{word_to_delete}' was not found in your vocabulary.")
+                        logger.warning(f"Word '{word_to_delete}' not found for chat ID {chat_id}.")
+            except sqlite3.Error as e:
+                logger.error(f"SQLite error: {e}")
+                update.message.reply_text("An error occurred while deleting the word.")
+            except Exception as e:
+                logger.error(f"Error deleting word ({chat_id}, {word_to_delete}): {e}")
+                update.message.reply_text("An error occurred while deleting the word.")
+    update.message.reply_text(f"The word{'s' if len(words_deleted)>1 else ''} '{', '.join(words_deleted)}' {'have' if len(words_deleted) > 1 else 'has'} been deleted from your vocabulary.")
 
 
 def turkish_meaning_command(update: Update, context: CallbackContext):
     if len(context.args) == 0:
         update.message.reply_text("Please provide a word to translate. (e.g. /tr word)")
         return
-
-    word_to_translate = context.args[0].lower()
     
-    # TODO: Check if the word is already in the database
+    all_meanings = False
+    for arg in context.args:
+        if arg.startswith('-'):
+            if arg == '-help':
+                update.message.reply_text("Usage: /tr [word]")
+                return
+            elif arg == '-all':
+                all_meanings = True
+            else: update.message.reply_text("Invalid option.")
+            
         
-    turkish_meaning = word.scrape_turkish_meaning(word_to_translate) 
-    if turkish_meaning:
-        turkish_meaning_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(turkish_meaning[:3]))
-        update.message.reply_text(f"*Turkish meaning of {word_to_translate}:*\n{turkish_meaning_text}", parse_mode=ParseMode.MARKDOWN)
-    else:
-        update.message.reply_text(f"No Turkish meaning found for '{word_to_translate}'.")
+        word_to_translate = arg.lower().strip()
+        # TODO: Check if the word is already in the database
+            
+        turkish_meaning = word.scrape_turkish_meaning(word_to_translate) 
+        if turkish_meaning:
+            turkish_meaning_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(turkish_meaning[:3 if not all_meanings else None]))
+            update.message.reply_text(f"*Turkish meaning of {word_to_translate}:*\n{turkish_meaning_text}", parse_mode=ParseMode.MARKDOWN)
+        else:
+            update.message.reply_text(f"No Turkish meaning found for '{word_to_translate}'.")
 
 def help_command(update: Update, context: CallbackContext):
     text = (
@@ -468,6 +479,7 @@ def help_command(update: Update, context: CallbackContext):
         text,
         parse_mode=ParseMode.MARKDOWN
     )
+    logger.info(f"Help command executed for chat ID {update.effective_chat.id}.")
 
 
 def send_essay_to_user(update: Update, context: CallbackContext) -> None:
@@ -483,7 +495,8 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
         if len(context.args) == 0:
             placeholder_message = update.message.reply_text("Generating essay...")
             essay = theAI.generate_an_essay_with_words(words)
-            voice = essay_pronounce(essay, slow=False, language='en')
+            voice_essay = essay
+            slow = False
         else:
             theme = ''
             length = ''
@@ -534,7 +547,7 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
                     theme += arg + ' '
             placeholder_message = update.message.reply_text("Generating essay...")
             essay = theAI.generate_an_essay_with_words(words, theme=theme.strip(), length=length, typ=typ, level=level)
-            voice = essay_pronounce(essay, slow=slow, language='en')
+            voice_essay = essay
         if not essay:
             context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
@@ -569,7 +582,8 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
         for chunk in essays[1:]:
             update.message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN)
         
-        context.bot.send_voice(chat_id=chat_id, voice=voice, caption="Here is your essay!")
+        voice = essay_pronounce(voice_essay, slow=slow, language='en')
+        context.bot.send_audio(chat_id=chat_id, audio=voice, title="Here is your essay!")
         
         logger.info(f"Sent essay to chat ID {chat_id}. It took {datetime.now(timezone.utc) - now} seconds.")
     except Exception as e:
@@ -594,7 +608,7 @@ def send_daily_essays(context: CallbackContext) -> None:
                 continue
 
             essay = theAI.generate_an_essay_with_words(words) # TODO: make it async
-            voice = essay_pronounce(essay, slow=False, language='en')
+            voice_essay = essay
             parts = essay.split('**')
             for i in range(1, len(parts), 2):
                 parts[i] = f'<b>{parts[i]}</b>'
@@ -624,7 +638,8 @@ def send_daily_essays(context: CallbackContext) -> None:
             for chunk in essays:
                 context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
             
-            context.bot.send_voice(chat_id=chat_id, voice=voice, caption="Here is your daily essay!")
+            voice = essay_pronounce(voice_essay, slow=False, language='en')
+            context.bot.send_audio(chat_id=chat_id, audio=voice, title="Here is your essay!")
 
         except Exception as e:
             logger.error(f"Error sending daily essay to chat ID {chat_id}: {e}")
