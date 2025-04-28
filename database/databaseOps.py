@@ -2,14 +2,15 @@ import sqlite3
 import threading
 import logging
 from datetime import datetime, timedelta, timezone
-import word_scraper as word
+import scraping.word_scraper as word
+from config.settings import DB_PATH, LOG_FILE_PATH
 
-
-db_path = 'theDataBase.db'
+db_path = DB_PATH
 db_lock = threading.Lock()
 
 
 logging.basicConfig(
+    filename=LOG_FILE_PATH,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
@@ -122,7 +123,6 @@ def match_user_with_word(chat_id: int, word_id: int) -> bool:
             cursor.execute('''INSERT INTO user_words (chat_id, word_id) VALUES (?, ?)''', (chat_id, word_id)) 
             conn.commit()
             conn.close()
-        logger.info(f"Matched user with chat ID {chat_id} to word ID {word_id}.")
         return True
     except sqlite3.Error as e: 
         logger.error(f"SQLite error: {e}")

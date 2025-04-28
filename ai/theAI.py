@@ -1,18 +1,15 @@
-from dotenv import load_dotenv
-import os
 from openai import OpenAI
 import logging
 import datetime
+from config.settings import deepseek_r1, LOG_FILE_PATH
 
 logging.basicConfig(
+    filename=LOG_FILE_PATH,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 ai_logger = logging.getLogger(__name__)
 
-
-load_dotenv()
-deepseek_r1 = os.getenv("OPENROUTER_DEEPSEEK_R1_API_KEY")
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
