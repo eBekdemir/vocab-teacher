@@ -1,16 +1,26 @@
 from dotenv import load_dotenv
 import os
 from openai import OpenAI
+import logging
+import datetime
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+ai_logger = logging.getLogger(__name__)
+
 
 load_dotenv()
-open_router_api_key = os.getenv("OPENROUTER_API_KEY")
+deepseek_r1 = os.getenv("OPENROUTER_DEEPSEEK_R1_API_KEY")
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=open_router_api_key
+    api_key=deepseek_r1
 )
 
 def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="story", level="B2"):
+    now = datetime.datetime.now()
     words_str = ", ".join(vocab_words)
     
     word_count = 1000 if length == "very-long" else 750 if length == "long" else 500 if length == "medium" else 300 if length == "short" else 150 if length == "very-short" else None
@@ -44,14 +54,24 @@ def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="stor
     Consider that the reader's english level is {level}. So use a language that is appropriate for that level.
     Your writing should be suitable for a {level} level reader.
     """
-    try:
-        completion = client.chat.completions.create(
-            model="deepseek/deepseek-r1:free",
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"An error occurred: {e}"
+    err = 0
+    ai_logger.info(f"Generating an essay - Theme: {theme_instruction}, Word Count: {word_count}, Type: {typ}, Level: {level}")
+    for _ in range(3):
+        try:
+            completion = client.chat.completions.create(
+                model="deepseek/deepseek-r1:free",
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            if completion.choices[0].message.content == "":
+                raise ValueError("Empty response from AI")
+            ai_logger.info(f"Essay generated in {datetime.datetime.now() - now} seconds")
+            return completion.choices[0].message.content
+        except Exception as e:
+            if err == 2: 
+                ai_logger.error(f"Essay couldn't generated in {datetime.datetime.now() - now} seconds")
+                return f"An error occurred: {e}"
+            err += 1
+            ai_logger.warning(f"Error generating essay: {e}, retrying...")

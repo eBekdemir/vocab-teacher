@@ -15,7 +15,10 @@ def scrape_the_word(wrd:str) -> tuple[list[str], list[str]]:
     word = word.strip().lower()
     
     url = f"https://dictionary.cambridge.org/dictionary/english/{word}"
-    response = session.get(url, headers=headers, verify=False, timeout=20)
+    for _ in range(2):
+        response = session.get(url, headers=headers, verify=False, timeout=20)
+        if response.status_code == 200:
+            break
 
     soup = bs(response.content, 'html.parser')
 
@@ -46,7 +49,11 @@ def scrape_turkish_meaning(wrd:str) -> list[str]:
     word = word.strip().lower()
     
     url = f"https://dictionary.cambridge.org/dictionary/english-turkish/{word}"
-    response = session.get(url, headers=headers, verify=True, timeout=20)
+    
+    for _ in range(2):
+        response = session.get(url, headers=headers, verify=False, timeout=20)
+        if response.status_code == 200:
+            break
     response.encoding = 'utf-8'
     
     soup = bs(response.content, 'html.parser')
