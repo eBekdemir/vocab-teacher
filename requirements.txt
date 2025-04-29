@@ -5,4 +5,4 @@ beautifulsoup4
 openai
 python-dotenv
 pytz
-sqlite3
+win10toast

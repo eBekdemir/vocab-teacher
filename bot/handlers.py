@@ -6,7 +6,7 @@ from config.settings import DB_PATH, LOG_FILE_PATH
 
 ### python-telegram-bot==13.15
 from telegram import Update, ParseMode
-from telegram.ext import Updater, CallbackContext
+from telegram.ext import CallbackContext
 
 import requests
 import logging
@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import urllib3
 from datetime import datetime, timedelta, timezone, time
-from .utils import pronounce, essay_pronounce
+from .utils import pronounce, essay_pronounce, escape_md, send_message_UPDATE, send_message_CONTEXT, edit_message, send_audio_CONTEXT, reply_audio_UPDATE
 
 db_lock = threading.Lock()
 db_path = DB_PATH
@@ -42,10 +42,6 @@ except Exception as e:
 
 
 # --- Command Handlers ---
-def escape_md(text: str) -> str:
-    escape_chars = r"\_*[]()~`>#+-=|{}.!"
-    return ''.join(f"\\{c}" if c in escape_chars else c for c in text)
-
 def handle_message(update: Update, context: CallbackContext): # TODO: Check whether the user exist or not!!!!
     # FIXME: for poet: ERROR - Error in handle_message: Can't parse entities: character '.' is reserved and must be escaped with the preceding '\'
     # i guess the problem is that the word has no examples or definitions, so it returns None. When i try second time, it works.
@@ -59,8 +55,8 @@ def handle_message(update: Update, context: CallbackContext): # TODO: Check whet
         check_db = get_word_from_db(wrd)
         if check_db == 'NOT IN DATABASE':
             the_id = add_word_to_db(wrd)
-            if not the_id: 
-                update.message.reply_text("I don't understand what you say!")
+            if not the_id:
+                send_message_UPDATE(update, parse_mode=None, text="I don't understand what you say!", sender='handle_message')
                 return
             match_user_with_word(chat_id=chat_id, word_id=the_id[0])
             word_id, definitions, examples = the_id
@@ -82,16 +78,16 @@ def handle_message(update: Update, context: CallbackContext): # TODO: Check whet
                 f"{defs}"
                 "\n\nThere are no examples available on Cambridge Dictionary for this word\."
             )
-        update.message.reply_text(reply_text, parse_mode=ParseMode.MARKDOWN_V2)
+        send_message_UPDATE(update, reply_text, parse_mode=ParseMode.MARKDOWN_V2, sender='handle_message')
 
     except Exception as e:
         logger.error(f"Error in handle_message: {e}")
-        update.message.reply_text("Something went wrong while processing your request.")
+        send_message_UPDATE(update, parse_mode=None, text="Something went wrong while processing your request.", sender='handle_message')
 
 
 def pronounce_command(update: Update, context: CallbackContext):
     if len(context.args) == 0:
-        update.message.reply_text("Please provide a word to pronounce. (e.g. /pronounce word)")
+        send_message_UPDATE(update, parse_mode=None, text="Please provide a word to pronounce. (e.g. /pronounce word)", sender='pronounce_command')
         return
 
     word_to_pronounce = ''
@@ -101,7 +97,7 @@ def pronounce_command(update: Update, context: CallbackContext):
             if arg == '-slow' or arg == '-s':
                 slow = True
             else:
-                update.message.reply_text("Invalid option. Use -slow or -s for slow pronunciation.")
+                send_message_UPDATE(update, parse_mode=None, text="Invalid option. Use -slow or -s for slow pronunciation.", sender='pronounce_command')
                 return
         else:
             word_to_pronounce += arg + ' '
@@ -110,16 +106,16 @@ def pronounce_command(update: Update, context: CallbackContext):
     
     audio_file = pronounce(word_to_pronounce, slow=slow, language='en')
     if audio_file:
-        update.message.reply_audio(voice=audio_file, caption=f"Pronunciation of *{word_to_pronounce}*:", parse_mode=ParseMode.MARKDOWN)
+        reply_audio_UPDATE(update, audio=audio_file, title=f"Pronunciation of *{word_to_pronounce}*:")
     else:
-        update.message.reply_text(f"Could not generate pronunciation for '{word_to_pronounce}'.")
+        send_message_UPDATE(update, f"Could not generate pronunciation for '{word_to_pronounce}'.", sender='pronounce_command')
         logger.error(f"Could not generate pronunciation for '{word_to_pronounce}'.")
 
 
 
 def define_command(update: Update, context: CallbackContext):
     if len(context.args) == 0:
-        update.message.reply_text("Please provide a word to define. (e.g. /define word)")
+        send_message_UPDATE(update, parse_mode=None, text="Please provide a word to define. (e.g. /define word)", sender='define_command')
         return
 
     chat_id = update.effective_chat.id
@@ -131,7 +127,7 @@ def define_command(update: Update, context: CallbackContext):
             if check_db == 'NOT IN DATABASE':
                 the_id = add_word_to_db(wrd)
                 if not the_id: 
-                    update.message.reply_text("I don't understand what you say!")
+                    send_message_UPDATE(update, parse_mode=None, text="I don't understand what you say!", sender='define_command')
                     return
                 word_id, definitions, examples = the_id
             else:
@@ -170,12 +166,11 @@ def define_command(update: Update, context: CallbackContext):
                 text = [reply_text]
 
             for rply in text:
-                update.message.reply_text(rply, parse_mode=ParseMode.MARKDOWN_V2)
-
+                send_message_UPDATE(update, rply, parse_mode=ParseMode.MARKDOWN_V2, sender='define_command')
 
         except Exception as e:
             logger.error(f"Error in handle_message: {e}")
-            update.message.reply_text(f"Something went wrong while processing your request. ({theWord})")
+            send_message_UPDATE(update, parse_mode=None, text=f"Something went wrong while processing your request. ({theWord})", sender='define_command')
 
 
 
@@ -192,7 +187,7 @@ def get_words_command(update: Update, context: CallbackContext) -> list[str]:
     if command in periods:
         period = periods.get(command)
     else:
-        update.message.reply_text("Invalid command. Please use /words, /today, or /this_week.")
+        send_message_UPDATE(update, text="Invalid command. Please use /words, /today, or /this_week.", parse_mode=None, sender='get_words_command')
         return
 
     chat_id = update.effective_chat.id
@@ -201,8 +196,8 @@ def get_words_command(update: Update, context: CallbackContext) -> list[str]:
     now = datetime.now(timezone.utc)
 
     if period == "today":
-        if now.hour < 12:
-            start_of_day = now - timedelta(hours=18)
+        if now.hour < 9:
+            start_of_day = now - timedelta(hours=12)
         else:
             start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
         time_condition = "AND uw.created_at >= ?"
@@ -214,7 +209,7 @@ def get_words_command(update: Update, context: CallbackContext) -> list[str]:
     elif period == "responsibility":
         reminders = get_reminder_cycle_of_a_user(chat_id)
         if reminders is None:
-            update.message.reply_text("You don't have any reminders set.")
+            send_message_UPDATE(update, "You don't have any reminders set.", parse_mode=None, sender='get_words_command')
             return
         valid_dates = [(now - timedelta(days=reminder)).date() for reminder in reminders]
         placeholders = ', '.join(['?'] * len(valid_dates))
@@ -256,13 +251,15 @@ def get_words_command(update: Update, context: CallbackContext) -> list[str]:
             "this_week": "this week",
             "responsibility": "your responsibility dates"
         }
-        update.message.reply_text(
-            f"Here are your words ({len(words)}) for {dct[period]}:\n\n{words_text}"
+        send_message_UPDATE(update,
+            f"Here are your words ({len(words)}) for {dct[period]}:\n\n{words_text}",
+            parse_mode=None, sender='get_words_command'
         )
     else:
-        update.message.reply_text(
+        send_message_UPDATE(update,
             f"You don't have any words in your vocabulary yet. "
-            f"Please send me a word to start learning!"
+            f"Please send me a word to start learning!",
+            parse_mode=None, sender='get_words_command'
         )
     logger.info(f"Words command executed for chat ID {chat_id} (period: {period}).")
 
@@ -271,7 +268,8 @@ def get_reminder_command(update: Update, context: CallbackContext) -> None:
     chat_id = update.effective_chat.id
     reminders = get_reminder_cycle_of_a_user(chat_id)
     if reminders is None:
-        update.message.reply_text("You don't have any reminders set.")
+        send_message_UPDATE(update, "You don't have any reminders set.", parse_mode=None, sender='get_reminder_command')
+        logger.warning(f"No reminders found for chat ID {chat_id}.")
         return
 
     reminder_text = (
@@ -283,13 +281,13 @@ def get_reminder_command(update: Update, context: CallbackContext) -> None:
         f"5th reminder: {reminders[4]} days ago\n"
         f"\nYou can change your reminder cycle with /set_reminders command."
     )
-    update.message.reply_text(reminder_text)
+    send_message_UPDATE(update, reminder_text, parse_mode=None, sender='get_reminder_command')
     logger.info(f"Reminder command executed for chat ID {chat_id}.")
 
-def set_reminder_command(update: Update, context: CallbackContext) -> None:
+def set_reminder_command(update: Update, context: CallbackContext) -> None: # TODO: Add feature of adding more and less reminders
     chat_id = update.effective_chat.id
     if len(context.args) != 5:
-        update.message.reply_text("Please provide 5 reminder intervals in days like the example:\n/set_reminders 1 2 4 8 16")
+        send_message_UPDATE(update, "Please provide 5 reminder intervals in days like the example:\n/set_reminders 1 2 4 8 16", parse_mode=None, sender='set_reminder_command')
         return
 
     try:
@@ -298,16 +296,16 @@ def set_reminder_command(update: Update, context: CallbackContext) -> None:
             raise ValueError("Reminder intervals must be non-negative.")
 
         if change_reminder_cycle_of_a_user(chat_id, *reminders):
-            update.message.reply_text(f"Your reminder cycle has been updated successfully.")
+            send_message_UPDATE(update, parse_mode=None, sender='set_reminder_command', text=f"Your reminder cycle has been updated successfully.")
             logger.info(f"Reminder cycle updated for chat ID {chat_id}.")
         else:
-            update.message.reply_text("Failed to update your reminder cycle.")
+            send_message_UPDATE(update, parse_mode=None, sender='set_reminder_command', text="Failed to update your reminder cycle.")
             logger.error(f"Failed to update reminder cycle for chat ID {chat_id}.")
     except ValueError as e:
-        update.message.reply_text(f"Invalid input: {e}")
+        send_message_UPDATE(update, parse_mode=None, sender='set_reminder_command', text=f"Invalid input: {e}")
         logger.error(f"Invalid input for reminder command ({chat_id}): {e}")
     except Exception as e:
-        update.message.reply_text("An error occurred while updating your reminder cycle.")
+        send_message_UPDATE(update, parse_mode=None, sender='set_reminder_command', text="An error occurred while updating your reminder cycle.")
         logger.error(f"Error while updating reminder cycle ({chat_id}): {e}")
 
 
@@ -316,7 +314,7 @@ def start(update: Update, context: CallbackContext):
     user_name = update.effective_user.first_name
     logger.info(f"/start command received from {user_name} ({chat_id})")
     if save_chat_id(update.effective_chat):
-        update.message.reply_text(
+        send_message_UPDATE(update, parse_mode=None, sender='start', text=
             f"Hello {user_name}! 👋\n"
             f"I am here to support your vocabulary level!\n"
             f"We will learn lots of new vocabulary together. "
@@ -325,7 +323,7 @@ def start(update: Update, context: CallbackContext):
             f"\n\n Kömen"
         )
     else:
-        update.message.reply_text(
+        send_message_UPDATE(update, parse_mode=None, sender='start', text=
             f"Hi! I have faced with some problems while saving you in our database. Please contact with the admin:\n"
             f"\n- Kömen | 42enesbekdemir@gmail.com"
         )
@@ -335,9 +333,9 @@ def stop(update: Update, context: CallbackContext):
     user_name = update.effective_user.first_name
     logger.info(f"/stop command received from {user_name} ({chat_id})")
     if delete_chat_id(chat_id):
-        update.message.reply_text("You have successfully stopped the bot. You can restart the bot with /start command. Good Bye! 👋")
+        send_message_UPDATE(update, parse_mode=None, sender='stop', text="You have successfully stopped the bot. You can restart the bot with /start command. Good Bye! 👋")
     else:
-        update.message.reply_text("You are not in our database. Please contact with the admin:\n\n- Kömen | 42enesbekdemir@gmail.com")
+        send_message_UPDATE(update, parse_mode=None, sender='stop', text="You are not in our database. Please contact with the admin:\n\n- Kömen | 42enesbekdemir@gmail.com")
 
 def stats_command(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
@@ -353,8 +351,8 @@ def stats_command(update: Update, context: CallbackContext):
         all_dates = [datetime.strptime(t[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc) for t in all_words]
         responsibility_sum = len(responsible_words(chat_id))
         now = datetime.now(timezone.utc)
-        if now.hour < 12:
-            start_of_day = now - timedelta(hours=18)
+        if now.hour < 9:
+            start_of_day = now - timedelta(hours=12)
         else:
             start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
@@ -383,19 +381,19 @@ def stats_command(update: Update, context: CallbackContext):
             f"\n\nYour current streak is <b>{streak}</b>{'💀' if streak >= 10 else '🔥' if streak >=5 else '😎' if streak >= 3 else ''} day{'s' if streak >= 2 else ''}.\n"
             f"\n\nYou can view your words with /words command.\n")            
 
-        update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        send_message_UPDATE(update, sender='stats_command', text=text, parse_mode=ParseMode.HTML)
         logger.info(f"Stats command executed for chat ID {chat_id}.")
     except sqlite3.Error as e:
         logger.error(f"SQLite error: {e}")
-        update.message.reply_text("An error occurred while retrieving stats.")
+        send_message_UPDATE(update, parse_mode=None, sender='stats_command', text="An error occurred while retrieving stats.")
     except Exception as e:
         logger.error(f"Error in stats command ({chat_id}): {e}")
-        update.message.reply_text("An error occurred while retrieving stats.")
+        send_message_UPDATE(update, parse_mode=None, sender='stats_command', text="An error occurred while retrieving stats.")
 
 def delete_word(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     if len(context.args) == 0:
-        update.message.reply_text("Please provide a word to delete. (e.g. /delete word)")
+        send_message_UPDATE(update, parse_mode=None, sender='delete_word', text="Please provide a word to delete. (e.g. /delete word)")
         return
 
     words_to_delete = [arg.lower() for arg in context.args]
@@ -410,42 +408,43 @@ def delete_word(update: Update, context: CallbackContext):
                     if conn.total_changes > 0: 
                         words_deleted.append(word_to_delete)
                     else:
-                        update.message.reply_text(f"The word '{word_to_delete}' was not found in your vocabulary.")
+                        send_message_UPDATE(update, parse_mode=None, sender='delete_word', text=f"The word '{word_to_delete}' was not found in your vocabulary.")
                         logger.warning(f"Word '{word_to_delete}' not found for chat ID {chat_id}.")
             except sqlite3.Error as e:
                 logger.error(f"SQLite error: {e}")
-                update.message.reply_text("An error occurred while deleting the word.")
+                send_message_UPDATE(update, parse_mode=None, sender='delete_command', text="An error occurred while deleting the word.")
             except Exception as e:
                 logger.error(f"Error deleting word ({chat_id}, {word_to_delete}): {e}")
-                update.message.reply_text("An error occurred while deleting the word.")
-    update.message.reply_text(f"The word{'s' if len(words_deleted)>1 else ''} '{', '.join(words_deleted)}' {'have' if len(words_deleted) > 1 else 'has'} been deleted from your vocabulary.")
+                send_message_UPDATE(update, parse_mode=None, sender='delete_command', text="An error occurred while deleting the word.")
+    send_message_UPDATE(update, parse_mode=None, sender='delete_command', text=f"The word{'s' if len(words_deleted)>1 else ''} '{', '.join(words_deleted)}' {'have' if len(words_deleted) > 1 else 'has'} been deleted from your vocabulary.")
 
 
 def turkish_meaning_command(update: Update, context: CallbackContext):
     if len(context.args) == 0:
-        update.message.reply_text("Please provide a word to translate. (e.g. /tr word)")
+        send_message_UPDATE(update, parse_mode=None, sender='turkish_meaning_command', text="Please provide a word to translate. (e.g. /tr word)")
         return
     
+    words_to_translate = []
     all_meanings = False
     for arg in context.args:
         if arg.startswith('-'):
             if arg == '-help':
-                update.message.reply_text("Usage: /tr [word]")
+                send_message_UPDATE(update, parse_mode=None, sender='turkish_meaning_command', text="Usage: /tr [word]")
                 return
             elif arg == '-all':
                 all_meanings = True
-            else: update.message.reply_text("Invalid option.")
+            else: send_message_UPDATE(update, parse_mode=None, sender='turkish_meaning_command', text="Invalid option.")
             
-        
-        word_to_translate = arg.lower().strip()
+        else: words_to_translate.append(arg.lower().strip())
         # TODO: Check if the word is already in the database
-            
+
+    for word_to_translate in words_to_translate:
         turkish_meaning = word.scrape_turkish_meaning(word_to_translate) 
         if turkish_meaning:
             turkish_meaning_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(turkish_meaning[:3 if not all_meanings else None]))
-            update.message.reply_text(f"*Turkish meaning of {word_to_translate}:*\n{turkish_meaning_text}", parse_mode=ParseMode.MARKDOWN)
+            send_message_UPDATE(update, sender='turkish_meaning_command', text=f"*Turkish meaning of {word_to_translate}:*\n{turkish_meaning_text}", parse_mode=ParseMode.MARKDOWN)
         else:
-            update.message.reply_text(f"No Turkish meaning found for '{word_to_translate}'.")
+            send_message_UPDATE(update, parse_mode=None, sender='turkish_meaning_command', text=f"No Turkish meaning found for '{word_to_translate}'.")
 
 def help_command(update: Update, context: CallbackContext):
     text = (
@@ -475,10 +474,7 @@ def help_command(update: Update, context: CallbackContext):
         "\n- *Kömen*✨"
     )
     # escaped_text = escape_md(text)
-    update.message.reply_text(
-        text,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    send_message_UPDATE(update, sender='help_command', text=text, parse_mode=ParseMode.MARKDOWN)
     logger.info(f"Help command executed for chat ID {update.effective_chat.id}.")
 
 
@@ -488,12 +484,11 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
         chat_id = update.effective_chat.id
         words = responsible_words(chat_id)
         if not words:
-            update.message.reply_text("You don't have any words to generate an essay.")
+            send_message_UPDATE(update, parse_mode=None, sender='send_essay_to_user', text="You don't have any words to generate an essay.")
             return
 
-
         if len(context.args) == 0:
-            placeholder_message = update.message.reply_text("Generating essay...")
+            placeholder_message = send_message_UPDATE(update, parse_mode=None, sender='send_essay_to_user', text="Generating essay...")
             essay = theAI.generate_an_essay_with_words(words)
             voice_essay = essay
             slow = False
@@ -507,7 +502,7 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
             for arg in context.args:
                 if arg.startswith('-'):
                     if arg == '-help':
-                        update.message.reply_text("Usage: /essay [-story | -essay | -paragraph] [-very-short | -short | -medium | -long | -very-long] [-A1 | -A2 | -B1 | -B2 | -C1 | -C2] [-today | -this-week | -all | -responsibility] [theme] \n\nFor example: /essay -story -short a day in the life of a student")
+                        send_message_UPDATE(update, parse_mode=None, sender='send_essay_to_user', text="Usage: /essay [-story | -essay | -paragraph] [-very-short | -short | -medium | -long | -very-long] [-A1 | -A2 | -B1 | -B2 | -C1 | -C2] [-today | -this-week | -all | -responsibility] [theme] \n\nFor example: /essay -story -short a day in the life of a student")
                         return
                     elif arg.startswith('-') and arg in ['-story', '-essay', '-paragraph']:
                         typ = arg[1:]
@@ -538,18 +533,19 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
                                 if result:
                                     words = [row[0] for row in result]
                                 else:
-                                    update.message.reply_text("No words found in your vocabulary.")
+                                    send_message_UPDATE(update, parse_mode=None, sender='send_essay_to_user', text="No words found in your vocabulary.")
                                     return
                     else:
-                        update.message.reply_text(f"Unknown argument: {arg}. Use /essay -help for usage.")
+                        send_message_UPDATE(update, parse_mode=None, sender='send_essay_to_user', text=f"Unknown argument: {arg}. Use /essay -help for usage.")
                         return
                 else:
                     theme += arg + ' '
-            placeholder_message = update.message.reply_text("Generating essay...")
+            placeholder_message = send_message_UPDATE(update, parse_mode=None, sender='send_essay_to_user', text="Generating essay...")
             essay = theAI.generate_an_essay_with_words(words, theme=theme.strip(), length=length, typ=typ, level=level)
             voice_essay = essay
         if not essay:
-            context.bot.edit_message_text(
+            edit_message(
+                context=context,
                 chat_id=update.effective_chat.id,
                 message_id=placeholder_message.message_id,
                 text="Failed to generate an essay. Please try again later.",
@@ -573,22 +569,23 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
 
         else:
             essays = [essay]
-        context.bot.edit_message_text(
+        edit_message(
+            context=context,
             chat_id=update.effective_chat.id,
             message_id=placeholder_message.message_id,
             text=essays[0],
             parse_mode=ParseMode.MARKDOWN 
         )
         for chunk in essays[1:]:
-            update.message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN)
+            send_message_UPDATE(update, sender='send_essay_to_user', text=chunk, parse_mode=ParseMode.MARKDOWN)
         
         voice = essay_pronounce(voice_essay, slow=slow, language='en')
-        context.bot.send_audio(chat_id=chat_id, audio=voice, title="Here is your essay!")
+        send_audio_CONTEXT(context, chat_id=chat_id, audio=voice, title="Here is your essay!")
         
-        logger.info(f"Sent essay to chat ID {chat_id}. It took {datetime.now(timezone.utc) - now} seconds.")
+        logger.info(f"Essay and it's pronunciation are sent to chat ID {chat_id}. It took {datetime.now(timezone.utc) - now} seconds.")
     except Exception as e:
         logger.error(f"Error in send_essay_to_user: {e}")
-        update.message.reply_text("An error occurred while generating the essay.")
+        send_message_UPDATE(update, parse_mode=None, sender='send_essay_to_user', text="An error occurred while generating the essay.")
         
 
 
@@ -636,10 +633,10 @@ def send_daily_essays(context: CallbackContext) -> None:
                 essays = [essay]
 
             for chunk in essays:
-                context.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
+                send_message_CONTEXT(context, chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
             
             voice = essay_pronounce(voice_essay, slow=False, language='en')
-            context.bot.send_audio(chat_id=chat_id, audio=voice, title="Here is your essay!")
+            send_audio_CONTEXT(context, chat_id=chat_id, audio=voice, title="Here is your essay!")
 
         except Exception as e:
             logger.error(f"Error sending daily essay to chat ID {chat_id}: {e}")

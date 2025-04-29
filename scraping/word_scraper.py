@@ -1,5 +1,15 @@
 import requests
 from bs4 import BeautifulSoup as bs
+from config.settings import RETRY_DELAY, RETRY_LIMIT, LOG_FILE_PATH
+import time
+import logging
+
+logging.basicConfig(
+    filename=LOG_FILE_PATH,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 session = requests.Session()
 headers = {
@@ -21,32 +31,22 @@ def scrape_the_word(wrd:str) -> tuple[list[str], list[str]]:
     word = word.strip().lower()
     
     url = f"https://dictionary.cambridge.org/dictionary/english/{word}"
-    for _ in range(2):
-        response = session.get(url, headers=headers, verify=False, timeout=20)
-        if response.status_code == 200:
-            break
+    for attempt in range(RETRY_LIMIT):
+        try:
+            response = session.get(url, headers=headers, verify=False, timeout=20)
+            response.raise_for_status()
+            soup = bs(response.content, 'html.parser')
+            
+            definitions = [item.text.strip().strip(':') for item in soup.find_all('div', class_='def ddef_d db')]
+            examples = [item.text.strip() for item in soup.find_all('div', class_='examp dexamp')]            
+            return definitions, examples
 
-    soup = bs(response.content, 'html.parser')
-
-    definitions = [item.text.strip().strip(':') for item in soup.find_all('div', class_='def ddef_d db')]
-    examples = [item.text.strip() for item in soup.find_all('div', class_='examp dexamp')]
-    
-    return definitions, examples
-
-
-# def scrape_tureng_turkish(wrd:str) -> list[str]:
-#     word = wrd.replace(' ', '-')
-    
-#     word = word.strip().lower()
-    
-#     url = f"https://tureng.com/tr/turkce-ingilizce/{word}"
-#     response = session.get(url, headers=headers, verify=True, timeout=20)
-#     response.encoding = 'utf-8'
-#     soup = bs(response.content, 'html.parser')
-
-#     turkish_meanings = [item.text.strip() for item in soup.find_all('td', class_='tr ts')]
-#     print(response.status_code) 403
-#     return turkish_meanings[:5]
+        except Exception as e:
+            logger.error(f"Error occurred while scraping ({word}): {e}")
+            time.sleep(RETRY_DELAY)
+            if attempt == RETRY_LIMIT - 1:
+                return [], []
+    return [], []
 
 
 def scrape_turkish_meaning(wrd:str) -> list[str]:
@@ -56,13 +56,19 @@ def scrape_turkish_meaning(wrd:str) -> list[str]:
     
     url = f"https://dictionary.cambridge.org/dictionary/english-turkish/{word}"
     
-    for _ in range(2):
-        response = session.get(url, headers=headers, verify=False, timeout=20)
-        if response.status_code == 200:
-            break
-    response.encoding = 'utf-8'
-    
-    soup = bs(response.content, 'html.parser')
+    for attempt in range(RETRY_LIMIT):
+        try:
+            response = session.get(url, headers=headers, verify=False, timeout=20)
+            response.raise_for_status()
+            response.encoding = 'utf-8'
+            soup = bs(response.content, 'html.parser')
 
-    turkish_meanings = [item.text.strip() for item in soup.find_all('span', class_='trans dtrans dtrans-se')]
-    return turkish_meanings
+            turkish_meanings = [item.text.strip() for item in soup.find_all('span', class_='trans dtrans dtrans-se')]
+            return turkish_meanings
+
+        except Exception as e:
+            logger.error(f"Error occurred while scraping ({word}): {e}")
+            time.sleep(RETRY_DELAY)
+            if attempt == RETRY_LIMIT - 1:
+                return []
+    return []

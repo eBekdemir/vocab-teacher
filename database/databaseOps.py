@@ -3,7 +3,7 @@ import threading
 import logging
 from datetime import datetime, timedelta, timezone
 import scraping.word_scraper as word
-from config.settings import DB_PATH, LOG_FILE_PATH
+from config.settings import DB_PATH, LOG_FILE_PATH, RETRY_LIMIT, RETRY_DELAY
 
 db_path = DB_PATH
 db_lock = threading.Lock()
@@ -73,10 +73,10 @@ def add_word_to_db(wrd: str) -> tuple[int, list[str], list[str]]:
     definitions, examples = word.scrape_the_word(wrd)
     turkish = word.scrape_turkish_meaning(wrd)
     if not definitions and not examples:
-        logger.warning(f"No definitions or examples found for word: {word}")
+        logger.warning(f"No definitions or examples found for word: {wrd}")
         return None
     if not turkish:
-        logger.warning(f"No turkish meaning found for word: {word}")
+        logger.warning(f"No turkish meaning found for word: {wrd}")
         turkish = None
     
     with db_lock:
@@ -105,7 +105,7 @@ def get_word_from_db(wrd: str) -> tuple[list[str], list[str]]:
             logger.info(f"Retrieved definitions and examples for word '{wrd}' from database.")
             return word_id, definitions.split(';;;'), examples.split(';;;')
         else:
-            logger.warning(f"Word '{wrd}' not found in database.")
+            logger.info(f"Word '{wrd}' not found in database.")
             return 'NOT IN DATABASE'
     except sqlite3.Error as e: 
         logger.error(f"SQLite error: {e}")
@@ -177,6 +177,9 @@ def delete_chat_id(chat_id) -> bool:
         except sqlite3.Error as e:
             logger.error(f"Database error deleting chat ID {chat_id}: {e}")
             return False
+        except Exception as e:
+            logger.error(f"Error while deleting chat ID {chat_id}: {e}")
+            return False
 
 def get_chat_ids() -> list[int]:
     with db_lock:
@@ -190,6 +193,10 @@ def get_chat_ids() -> list[int]:
         except sqlite3.Error as e:
             logger.error(f"Database error getting chat IDs: {e}")
             return []
+        except Exception as e:
+            logger.error(f"Error while getting chat IDs: {e}")
+            return []
+
 
 def get_reminder_cycle_of_a_user(chat_id: int) -> tuple[int, int, int, int, int]:
     with db_lock:

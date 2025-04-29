@@ -80,7 +80,8 @@ if __name__ == '__main__':
     main()
 
     # TODO: Add exam functionality (multiple choice, fill in the blanks, etc.)
-    # TODO: Add email functionality (send daily essays to email) and email subscription (/subscribe_email [email])
+    
+    # TODO: Add email functionality (send daily essays to email) and email subscription (/subscribe_email [email]) (/send_essay to send last essay to email)
     
     # TODO: Research what is inline mode and how to use it
     
@@ -96,3 +97,5 @@ if __name__ == '__main__':
     # TODO: Offer pre-defined lists of words users can add (e.g., "Business English", "Academic Vocabulary", "Common Phrasal Verbs")
     
     # TODO: /essay -today (-this_week) to generate an essay using the words added today 
+    
+    # FIXME: Fix delete and translate commands, and add the feature of adding multiple words with one message
