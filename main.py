@@ -99,3 +99,5 @@ if __name__ == '__main__':
     # TODO: /essay -today (-this_week) to generate an essay using the words added today 
     
     # FIXME: Fix delete and translate commands, and add the feature of adding multiple words with one message
+
+    # TODO: /is_awake

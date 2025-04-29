@@ -2,6 +2,7 @@ from openai import OpenAI
 import logging
 import datetime
 from config.settings import AI_API, LOG_FILE_PATH, AI_MODEL
+from random import shuffle
 
 logging.basicConfig(
     filename=LOG_FILE_PATH,
@@ -18,6 +19,7 @@ client = OpenAI(
 
 def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="story", level="B2"):
     now = datetime.datetime.now()
+    shuffle(vocab_words)
     words_str = ", ".join(vocab_words)
     if typ not in ["story", "essay", "paragraph"]:
         typ = "story"
@@ -53,7 +55,7 @@ def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="stor
     Your writing should be suitable for a {level} level reader.
     """
     err = 0
-    ai_logger.info(f"Generating an essay - Theme: {theme_instruction}, Word Count: {word_count}, Type: {typ}, Level: {level}")
+    ai_logger.info(f"Generating an essay - Theme: {theme_instruction}, Essay Word Count: {word_count}, Vocab Count: {len(vocab_words)}, Type: {typ}, Level: {level}")
     for _ in range(3):
         try:
             completion = client.chat.completions.create(

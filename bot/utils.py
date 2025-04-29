@@ -154,10 +154,10 @@ def edit_message(context, chat_id, message_id, text, parse_mode=None):
             logger.error(f"Unexpected error: {e}.")
 
 
-def send_audio_CONTEXT(context, chat_id, audio, title):
+def send_audio_CONTEXT(context, chat_id, audio, title, parse_mode=None, sender='-'):
     for attempt in range(RETRY_LIMIT):
         try:
-            msg = context.bot.send_audio(chat_id=chat_id, audio=audio, title=title)
+            msg = context.bot.send_audio(chat_id=chat_id, audio=audio, title=title, parse_mode=parse_mode)
             return msg
         except NetworkError as e:
             if attempt == RETRY_LIMIT - 1:
@@ -193,7 +193,7 @@ def send_audio_CONTEXT(context, chat_id, audio, title):
             logger.error(f"Unexpected error: {e}.")
 
 
-def reply_audio_UPDATE(update, audio, title, parse_mode=None):
+def reply_audio_UPDATE(update, audio, title, parse_mode=None, sender='-'):
     for attempt in range(RETRY_LIMIT):
         try:
             msg = update.message.reply_audio(audio=audio, title=title, parse_mode=parse_mode)
@@ -228,5 +228,83 @@ def reply_audio_UPDATE(update, audio, title, parse_mode=None):
         except Exception as e:
             if attempt == RETRY_LIMIT - 1:
                 logger.error(f"Failed to send audio after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"Unexpected error: {e}.")
+
+
+def send_voice_CONTEXT(context, chat_id, voice, caption, parse_mode=None, sender='-'):
+    for attempt in range(RETRY_LIMIT):
+        try:
+            msg = context.bot.send_voice(chat_id=chat_id, voice=voice, caption=caption, parse_mode=parse_mode)
+            return msg
+        except NetworkError as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"Network error: {e}. Retrying...")
+            time.sleep(RETRY_DELAY**(attempt + 1))
+        except Unauthorized as e:
+            logger.error(f"Unauthorized error: {e}. User may have blocked the bot")
+            return 'UNAUTHORIZED'
+        except BadRequest as e:
+            logger.error(f"BadRequest error: {e}. Invalid message format")
+            return 'BAD_REQUEST'
+        except TimedOut as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"TimedOut error: {e}. Retrying...")
+            time.sleep(RETRY_DELAY**(attempt + 1))
+        except RetryAfter as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"RetryAfter error: {e}. Retrying after {e.retry_after} seconds")
+            time.sleep(e.retry_after)
+        except TelegramError as e:
+            logger.error(f"Telegram error: {e}.")
+            return 'ERROR'
+        except Exception as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"Unexpected error: {e}.")
+
+
+def reply_voice_UPDATE(update, voice, caption, parse_mode=None, sender='-'):
+    for attempt in range(RETRY_LIMIT):
+        try:
+            msg = update.message.reply_voice(voice=voice, caption=caption, parse_mode=parse_mode)
+            return msg
+        except NetworkError as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"Network error: {e}. Retrying...")
+            time.sleep(RETRY_DELAY**(attempt + 1))
+        except Unauthorized as e:
+            logger.error(f"Unauthorized error: {e}. User may have blocked the bot")
+            return 'UNAUTHORIZED'
+        except BadRequest as e:
+            logger.error(f"BadRequest error: {e}. Invalid message format")
+            return 'BAD_REQUEST'
+        except TimedOut as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"TimedOut error: {e}. Retrying...")
+            time.sleep(RETRY_DELAY**(attempt + 1))
+        except RetryAfter as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
+                return 'ERROR'
+            logger.error(f"RetryAfter error: {e}. Retrying after {e.retry_after} seconds")
+            time.sleep(e.retry_after)
+        except TelegramError as e:
+            logger.error(f"Telegram error: {e}.")
+            return 'ERROR'
+        except Exception as e:
+            if attempt == RETRY_LIMIT - 1:
+                logger.error(f"Failed to send voice after {RETRY_LIMIT} attempts: {e}")
                 return 'ERROR'
             logger.error(f"Unexpected error: {e}.")

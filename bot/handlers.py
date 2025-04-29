@@ -14,7 +14,7 @@ import sqlite3
 import threading
 import urllib3
 from datetime import datetime, timedelta, timezone, time
-from .utils import pronounce, essay_pronounce, escape_md, send_message_UPDATE, send_message_CONTEXT, edit_message, send_audio_CONTEXT, reply_audio_UPDATE
+from .utils import pronounce, essay_pronounce, escape_md, send_message_UPDATE, send_message_CONTEXT, edit_message, send_audio_CONTEXT, reply_audio_UPDATE, send_voice_CONTEXT, reply_voice_UPDATE
 
 db_lock = threading.Lock()
 db_path = DB_PATH
@@ -106,7 +106,8 @@ def pronounce_command(update: Update, context: CallbackContext):
     
     audio_file = pronounce(word_to_pronounce, slow=slow, language='en')
     if audio_file:
-        reply_audio_UPDATE(update, audio=audio_file, title=f"Pronunciation of *{word_to_pronounce}*:")
+        # reply_audio_UPDATE(update, audio=audio_file, title=f"Pronunciation of *{word_to_pronounce}*:")
+        reply_voice_UPDATE(update, voice=audio_file, caption=f"Pronunciation of *{word_to_pronounce}*:", parse_mode=ParseMode.MARKDOWN, sender='pronounce_command')
     else:
         send_message_UPDATE(update, f"Could not generate pronunciation for '{word_to_pronounce}'.", sender='pronounce_command')
         logger.error(f"Could not generate pronunciation for '{word_to_pronounce}'.")
@@ -580,7 +581,8 @@ def send_essay_to_user(update: Update, context: CallbackContext) -> None:
             send_message_UPDATE(update, sender='send_essay_to_user', text=chunk, parse_mode=ParseMode.MARKDOWN)
         
         voice = essay_pronounce(voice_essay, slow=slow, language='en')
-        send_audio_CONTEXT(context, chat_id=chat_id, audio=voice, title="Here is your essay!")
+        # send_audio_CONTEXT(context, chat_id=chat_id, audio=voice, title="Here is your essay!")
+        send_voice_CONTEXT(context, chat_id=chat_id, voice=voice, caption="Here is your essay!")
         
         logger.info(f"Essay and it's pronunciation are sent to chat ID {chat_id}. It took {datetime.now(timezone.utc) - now} seconds.")
     except Exception as e:
@@ -636,7 +638,8 @@ def send_daily_essays(context: CallbackContext) -> None:
                 send_message_CONTEXT(context, chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML) # FIXME: Convert this to markdown v2
             
             voice = essay_pronounce(voice_essay, slow=False, language='en')
-            send_audio_CONTEXT(context, chat_id=chat_id, audio=voice, title="Here is your essay!")
+            # send_audio_CONTEXT(context, chat_id=chat_id, audio=voice, title="Here is your essay!")
+            send_voice_CONTEXT(context, chat_id=chat_id, voice=voice, caption="Here is your essay!")
 
         except Exception as e:
             logger.error(f"Error sending daily essay to chat ID {chat_id}: {e}")
