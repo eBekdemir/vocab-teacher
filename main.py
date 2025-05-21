@@ -6,7 +6,7 @@ from config.settings import TELEGRAM_BOT_TOKEN, DAILY_ESSAYS_TIME, LOG_FILE_PATH
 
 logging.basicConfig(
     filename=LOG_FILE_PATH,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)

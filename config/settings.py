@@ -2,8 +2,19 @@ import os
 from dotenv import load_dotenv
 from datetime import time
 import pytz
+import logging
 
 load_dotenv()
+
+LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", "logs/bot.log")
+logging.basicConfig(
+    filename=LOG_FILE_PATH,
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+
 
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 
@@ -13,7 +24,6 @@ AI_API = os.getenv("OPENROUTER_API_KEY")
 
 DAILY_ESSAYS_TIME = time(hour=19, minute=0, second=0, tzinfo=pytz.utc)
 
-LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", "logs/bot.log")
 if not os.path.exists(os.path.dirname(LOG_FILE_PATH)):
     os.makedirs(os.path.dirname(LOG_FILE_PATH))
 

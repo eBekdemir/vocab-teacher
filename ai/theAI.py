@@ -6,7 +6,7 @@ from random import shuffle
 
 logging.basicConfig(
     filename=LOG_FILE_PATH,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     level=logging.INFO
 )
 ai_logger = logging.getLogger(__name__)
@@ -32,30 +32,26 @@ def generate_an_essay_with_words(vocab_words, theme=None, length=None, typ="stor
     
     prompt = f"""
     Write a {word_count}-word {typ}{theme_instruction} that naturally incorporates the following vocabulary words: 
-    {words_str}.
+    {words_str}
 
-    The {typ} should be engaging and imaginative, with a clear beginning, middle, and end. 
-    Use descriptive language to create vivid imagery and evoke emotions in the reader. 
-    The vocabulary words should be used in a way that enhances the {typ}, rather than feeling forced or out of place. 
-    Aim for a balance between creativity and clarity, ensuring that the {typ} is easy to follow while still being rich in detail. 
-    Avoid using overly complex sentence structures or obscure references that may confuse the reader. Instead, focus on creating a narrative that is both entertaining and thought-provoking. 
-    The words should blend seamlessly into the narrative, demonstrating their meanings through context rather than direct definitions.
-    Use all the words in their correct context
-    Bold each vocabulary word when it appears in the {typ}.
-    Use a good english grammar and punctuation.
-    Avoid using the words in a list format or as a list of definitions.
-    Give me just the {typ} without any additional commentary or explanation.
+    The {typ} should have a clear beginning, middle, and end. It must be engaging, imaginative, and easy to follow. 
+    Use vivid, descriptive language to create imagery and evoke emotion, but avoid complex sentence structures or obscure references. 
+    Each vocabulary word must be used **bolded**, in proper context, and blended seamlessly into the narrative. 
+    Do not define the words directly or list them.
+
+    Ensure correct grammar and punctuation throughout.
+    Return only the {typ}, with no additional text or explanations.
     """
     system_instruction = f"""
-    You are a master storyteller and educator whose primary mission is to teach vocabulary through emotionally engaging, context-rich essays. 
-    Every essay must integrate a provided list of vocabulary words seamlessly into the narrative.
-    You must NOT define the words directly. Instead, you must demonstrate their meaning naturally through how they are used in the story or essay.
-    Your writing should be suitable for markdown.
-    Consider that the reader's english level is {level}. So use a language that is appropriate for that level.
-    Your writing should be suitable for a {level} level reader.
+    You are a master storyteller and educator. Your mission is to teach vocabulary by crafting emotionally engaging, context-rich {typ}s. 
+    You must never define the vocabulary words directly; instead, demonstrate their meanings through natural use in the narrative. 
+
+    All writing should be appropriate for a reader at the {level} English level—clear, expressive, and grammatically sound.
+    Style should be suitable for markdown format.
     """
+
     err = 0
-    ai_logger.info(f"Generating an essay - Theme: {theme_instruction}, Essay Word Count: {word_count}, Vocab Count: {len(vocab_words)}, Type: {typ}, Level: {level}")
+    ai_logger.info(f"Generating an essay - Theme: {theme_instruction}, Essay Word Count: {word_count}, Vocab Count: {len(vocab_words)}, Type: {typ}, Level: {level}, Model: {AI_MODEL}")
     for _ in range(3):
         try:
             completion = client.chat.completions.create(
